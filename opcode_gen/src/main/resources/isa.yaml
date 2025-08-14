@@ -107,12 +107,13 @@ chapters:
 
 # File format and ISA versioning
 min_version: 0.0.0.2
-version: 13.0.0.0
+version: 13.0.1.0
 
 # 0 is default value, alaways reflects to the newest version.
-# Due to historical reasons, bytecode version is upgraded to 13.0.0.0 in API15.
-api_version_map: [[0, 13.0.0.0], [9, 9.0.0.0], [10, 9.0.0.0], [11, 11.0.2.0], [12, 12.0.6.0], [13, 12.0.6.0],
-                  [14, 12.0.6.0], [15, 13.0.0.0]]
+# Due to historical reasons, bytecode version is upgraded to 13.0.1.0 in API18.
+api_version_map: [[0, 13.0.1.0], [9, 9.0.0.0], [10, 9.0.0.0], [11, 11.0.2.0], [12, 12.0.6.0], [13, 12.0.6.0],
+                  [14, 12.0.6.0], [15, 12.0.6.0], [16, 12.0.6.0], [17, 12.0.6.0], [18, 13.0.1.0], [19, 13.0.1.0],
+                  [20, 13.0.1.0]]
 
 # When delete bytecode or having any incompatible modification on bytecode,
 # please add the incompatible version in this list for prompting error message.
@@ -165,6 +166,18 @@ properties:
     description: The instruction occupies ic slots of 16 bit width.
   - tag: eight_sixteen_bit_ic
     description: The instruction occupies ic slots of both 8 and 16 bit width.
+  - tag: conditional_throw
+    description: The throw instruction can throw an excepton only if certain conditions are met.
+  - tag: range_0
+    description: Indicates that the instruction takes some consective registers as inputs.
+      The start register of these consective inputs is the last register of the instruction.
+      The number of consective inputs is the last immediate of the instruction.
+  - tag: range_1
+    description: Indicates that the instruction takes some consective registers as inputs.
+      The start register of these consective inputs is the last register of the instruction.
+      The number of consective inputs is the last immediate of the instruction plus 1.
+  - tag: no_side_effect
+    description: The instruction doesn't have side effects. Can be safely optimized by bytecode optimizer.
 
 exceptions:
   - tag: x_none
@@ -267,7 +280,7 @@ isa_information:
     last_throw_prefixed_opcode_idx: 0x09
     last_wide_prefixed_opcode_idx: 0x13
     last_deprecated_prefixed_opcode_idx: 0x2e
-    last_callruntime_prefixed_opcode_idx: 0x19
+    last_callruntime_prefixed_opcode_idx: 0x1b
 
 prefixes:
   - name: throw
@@ -303,18 +316,22 @@ groups:
         acc: out:top
         opcode_idx: [0x6a]
         format: [op_none]
+        properties: [no_side_effect]
       - sig: ldinfinity
         acc: out:top
         opcode_idx: [0x6b]
         format: [op_none]
+        properties: [no_side_effect]
       - sig: ldundefined
         acc: out:top
         opcode_idx: [0x00]
         format: [op_none]
+        properties: [no_side_effect]
       - sig: ldnull
         acc: out:top
         opcode_idx: [0x01]
         format: [op_none]
+        properties: [no_side_effect]
       - sig: ldsymbol
         acc: out:top
         opcode_idx: [0xad]
@@ -327,14 +344,17 @@ groups:
         acc: out:top
         opcode_idx: [0x02]
         format: [op_none]
+        properties: [no_side_effect]
       - sig: ldfalse
         acc: out:top
         opcode_idx: [0x03]
         format: [op_none]
+        properties: [no_side_effect]
       - sig: ldhole
         acc: out:top
         opcode_idx: [0x70]
         format: [op_none]
+        properties: [no_side_effect]
       - sig: deprecated.ldlexenv
         acc: out:top
         opcode_idx: [0x00]
@@ -475,11 +495,13 @@ groups:
         acc: out:top
         opcode_idx: [0xb3]
         format: [op_imm_8_v1_8_v2_8]
+        properties: [range_1]
       - sig: wide.createobjectwithexcludedkeys imm:u16, v1:in:top, v2:in:top
         acc: out:top
         opcode_idx: [0x00]
         format: [pref_op_imm_16_v1_8_v2_8]
         prefix: wide
+        properties: [range_1]
       - sig: createarraywithbuffer imm:u16, literalarray_id
         acc: out:top
         opcode_idx: [0x06, 0x81]
@@ -514,12 +536,13 @@ groups:
         acc: out:top
         opcode_idx: [0x08, 0x83]
         format: [op_imm1_8_imm2_8_v_8, op_imm1_16_imm2_8_v_8]
-        properties: [ic_slot, two_slot, eight_sixteen_bit_ic]
+        properties: [ic_slot, two_slot, eight_sixteen_bit_ic, range_0]
       - sig: wide.newobjrange imm:u16, v:in:top
         acc: out:top
         opcode_idx: [0x01]
         format: [pref_op_imm_16_v_8]
         prefix: wide
+        properties: [range_0]
       - sig: newlexenv imm:u8
         acc: out:top
         opcode_idx: [0x09]
@@ -971,22 +994,35 @@ groups:
         opcode_idx: [0x05]
         format: [pref_op_v_8]
         prefix: throw
+        properties: [conditional_throw]
       - sig: throw.undefinedifhole v1:in:top, v2:in:top
         acc: none
         opcode_idx: [0x06]
         format: [pref_op_v1_8_v2_8]
         prefix: throw
+        properties: [conditional_throw]
       - sig: throw.ifsupernotcorrectcall imm:u16
         acc: in:top
         opcode_idx: [0x07, 0x08]
         format: [pref_op_imm_8, pref_op_imm_16]
         prefix: throw
+        properties: [conditional_throw]
       - sig: throw.undefinedifholewithname string_id
         acc: in:top
         opcode_idx: [0x09]
         format: [pref_op_id_16]
         prefix: throw
-        properties: [string_id]
+        properties: [string_id, conditional_throw]
+      - sig: callruntime.ldsendablelocalmodulevar imm:u8
+        acc: out:top
+        opcode_idx: [0x1a]
+        format: [pref_op_imm_8]
+        prefix: callruntime
+      - sig: callruntime.wideldsendablelocalmodulevar imm:u16
+        acc: out:top
+        opcode_idx: [0x1b]
+        format: [pref_op_imm_16]
+        prefix: callruntime
 
   - title: call instructions
     description: call
@@ -1047,17 +1083,19 @@ groups:
         acc: inout:top
         opcode_idx: [0x73]
         format: [op_imm1_8_imm2_8_v_8]
-        properties: [jit_ic_slot, two_slot, eight_bit_ic]
+        properties: [jit_ic_slot, two_slot, eight_bit_ic, range_0]
       - sig: wide.callrange imm:u16, v:in:top
         acc: inout:top
         opcode_idx: [0x04]
         format: [pref_op_imm_16_v_8]
         prefix: wide
+        properties: [range_0]
       - sig: deprecated.callrange imm:u16, v:in:top
         acc: out:top
         opcode_idx: [0x0f]
         format: [pref_op_imm_16_v_8]
         prefix: deprecated
+        properties: [range_0]
       - sig: supercallspread imm:u8, v:in:top
         acc: inout:top
         opcode_idx: [0xb9]
@@ -1097,37 +1135,41 @@ groups:
         acc: inout:top
         opcode_idx: [0x31]
         format: [op_imm1_8_imm2_8_v_8]
-        properties: [jit_ic_slot, two_slot, eight_bit_ic]
+        properties: [jit_ic_slot, two_slot, eight_bit_ic, range_0]
       - sig: wide.callthisrange imm:u16, v:in:top
         acc: inout:top
         opcode_idx: [0x05]
         format: [pref_op_imm_16_v_8]
         prefix: wide
+        properties: [range_1]
       - sig: deprecated.callthisrange imm:u16, v:in:top
         acc: out:top
         opcode_idx: [0x11]
         format: [pref_op_imm_16_v_8]
         prefix: deprecated
+        properties: [range_1]
       - sig: supercallthisrange imm1:u8, imm2:u8, v:in:top
         acc: out:top
         opcode_idx: [0x32]
         format: [op_imm1_8_imm2_8_v_8]
-        properties: [jit_ic_slot, two_slot, eight_bit_ic]
+        properties: [jit_ic_slot, two_slot, eight_bit_ic, range_0]
       - sig: wide.supercallthisrange imm:u16, v:in:top
         acc: out:top
         opcode_idx: [0x06]
         format: [pref_op_imm_16_v_8]
         prefix: wide
+        properties: [range_0]
       - sig: supercallarrowrange imm1:u8, imm2:u8, v:in:top
         acc: inout:top
         opcode_idx: [0xbb]
         format: [op_imm1_8_imm2_8_v_8]
-        properties: [jit_ic_slot, two_slot, eight_bit_ic]
+        properties: [jit_ic_slot, two_slot, eight_bit_ic, range_0]
       - sig: wide.supercallarrowrange imm:u16, v:in:top
         acc: inout:top
         opcode_idx: [0x07]
         format: [pref_op_imm_16_v_8]
         prefix: wide
+        properties: [range_0]
 
   - title: definition instuctions
     description: instructions which define object

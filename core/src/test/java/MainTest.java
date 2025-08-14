@@ -27,8 +27,9 @@ public class MainTest {
             for (PandaClass pandaClass : indexHeader.getPandaClasses()) {
                 System.out.println(pandaClass.getName());
                 if (pandaClass.getName().getContent().startsWith("")){
-                    String out = disCompiler.decompileClassRaw(pandaClass);
-                    PandaDecompiler.saveFile(outDir,pandaClass,out);
+                    String out = disCompiler.decompileClass(pandaClass);
+                    System.out.println(out);
+//                    PandaDecompiler.saveFile(outDir,pandaClass,out);
                 }
             }
         }
