@@ -10,6 +10,7 @@ import jmp0.abc.file.PandaFile;
 import jmp0.abc.file.clazz.PandaClass;
 import jmp0.abc.file.desc.IndexHeader;
 import jmp0.abc.file.desc.Offset;
+import jmp0.abc.file.desc.PandaString;
 import jmp0.abc.file.field.PandaField;
 import jmp0.abc.file.method.PandaMethod;
 
@@ -19,6 +20,7 @@ public class GlobalXrefManager {
     private final Map<String, List<String>> classXrefs = new HashMap<>();
     private final Map<String, List<String>> methodXrefs = new HashMap<>();
     private final Map<String, List<String>> fieldXrefs = new HashMap<>();
+    private final Map<String, List<String>> stringXrefs = new HashMap<>();
 
     private final Map<String, String> inheritanceParent = new HashMap<>();
     private final Map<String, List<String>> inheritanceChildren = new HashMap<>();
@@ -79,6 +81,10 @@ public class GlobalXrefManager {
             }
         }
 
+        // Second pass: heuristic inheritance based on strings
+        // If a class uses a string matching another short class name in its <init> or #~@0=#... methods
+        // we can guess it might be a parent. For simplicity we'll just expose strings.
+
         isBuilt = true;
         System.out.println("[MCP] Xref cache built in " + (System.currentTimeMillis() - startTime) + "ms.");
     }
@@ -106,9 +112,13 @@ public class GlobalXrefManager {
                     }
                 }
             } else if (idParam.getType() == PandaInstructionID.TYPE.TYPE) {
-                // If TYPE was resolved, we could extract class here. Since it's fixme in xpanda, it might be null.
                 if (idParam.getObj() instanceof PandaClass) {
                     addClassXref(((PandaClass) idParam.getObj()).getName().getContent(), sourceMethod);
+                }
+            } else if (idParam.getType() == PandaInstructionID.TYPE.STRING) {
+                if (idParam.getObj() instanceof PandaString) {
+                    String strVal = ((PandaString) idParam.getObj()).getContent();
+                    addStringXref(strVal, sourceMethod);
                 }
             }
         } catch (Exception e) {
@@ -128,26 +138,110 @@ public class GlobalXrefManager {
         fieldXrefs.computeIfAbsent(target, k -> new ArrayList<>()).add(source);
     }
 
+    private void addStringXref(String target, String source) {
+        stringXrefs.computeIfAbsent(target, k -> new ArrayList<>()).add(source);
+    }
+
+    private String extractShortName(String className) {
+        if (className == null) return null;
+        String name = className;
+        if (name.startsWith("L")) name = name.substring(1);
+        if (name.endsWith(";")) name = name.substring(0, name.length() - 1);
+        if (name.endsWith("&")) name = name.substring(0, name.length() - 1);
+        int lastSlash = name.lastIndexOf('/');
+        if (lastSlash != -1) {
+            name = name.substring(lastSlash + 1);
+        }
+        return name;
+    }
+
     public List<String> getClassXrefs(String className) {
-        return classXrefs.getOrDefault(className, Collections.emptyList());
+        Set<String> result = new LinkedHashSet<>(classXrefs.getOrDefault(className, Collections.emptyList()));
+        String shortName = extractShortName(className);
+        if (shortName != null && !shortName.isEmpty()) {
+            for (String usage : stringXrefs.getOrDefault(shortName, Collections.emptyList())) {
+                result.add(usage + " (heuristic string match)");
+            }
+        }
+        return new ArrayList<>(result);
     }
 
     public List<String> getMethodXrefs(String className, String methodName) {
-        return methodXrefs.getOrDefault(className + "->" + methodName, Collections.emptyList());
+        Set<String> result = new LinkedHashSet<>(methodXrefs.getOrDefault(className + "->" + methodName, Collections.emptyList()));
+        if (methodName != null && !methodName.isEmpty()) {
+            List<String> strUsages = stringXrefs.get(methodName);
+            if (strUsages != null) {
+                String shortClass = extractShortName(className);
+                for (String usage : strUsages) {
+                    if (shortClass != null && stringXrefs.getOrDefault(shortClass, Collections.emptyList()).contains(usage)) {
+                        result.add(usage + " (heuristic string match)");
+                    }
+                }
+            }
+        }
+        return new ArrayList<>(result);
     }
 
     public List<String> getFieldXrefs(String className, String fieldName) {
         return fieldXrefs.getOrDefault(className + "->" + fieldName, Collections.emptyList());
     }
 
+    public List<String> getClassesUsingString(String keyword) {
+        String lowerKeyword = keyword.toLowerCase();
+        Set<String> result = new LinkedHashSet<>();
+        for (Map.Entry<String, List<String>> entry : stringXrefs.entrySet()) {
+            if (entry.getKey().toLowerCase().contains(lowerKeyword)) {
+                for (String usage : entry.getValue()) {
+                    int arrowIdx = usage.indexOf("->");
+                    if (arrowIdx != -1) {
+                        result.add(usage.substring(0, arrowIdx));
+                    }
+                }
+            }
+        }
+        return new ArrayList<>(result);
+    }
+
     public String getInheritanceHierarchy(String className) {
         StringBuilder sb = new StringBuilder();
         sb.append("Hierarchy for ").append(className).append(":\n");
         String parent = inheritanceParent.get(className);
+        
+        if (parent == null) {
+            // Heuristic fallback for ArkTS
+            String shortName = extractShortName(className);
+            if (shortName != null) {
+                for (String usage : stringXrefs.getOrDefault(shortName, Collections.emptyList())) {
+                    if (usage.contains("#~@0=#") || usage.contains("<init>")) {
+                        // Found class init doing string ref, the class it belongs to might be child?
+                        // Or if this class references something else
+                        // Let's check what strings this class uses
+                        break;
+                    }
+                }
+            }
+        }
+
         if (parent != null) {
             sb.append("Parent: ").append(parent).append("\n");
         } else {
             sb.append("Parent: (none or unresolved)\n");
+            // Find any strings used in the class that look like a base class name
+            List<String> candidateParents = new ArrayList<>();
+            for (Map.Entry<String, List<String>> entry : stringXrefs.entrySet()) {
+                String str = entry.getKey();
+                if (str.endsWith("Ability") || str.endsWith("Model") || str.startsWith("Base")) {
+                    for (String usage : entry.getValue()) {
+                        if (usage.startsWith(className + "->")) {
+                            candidateParents.add(str);
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!candidateParents.isEmpty()) {
+                sb.append("Heuristic Parent Candidates (from string literals): ").append(candidateParents).append("\n");
+            }
         }
         
         List<String> children = inheritanceChildren.get(className);

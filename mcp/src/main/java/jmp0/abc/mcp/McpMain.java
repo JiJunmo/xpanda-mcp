@@ -14,6 +14,8 @@ import java.io.InputStreamReader;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.LinkedHashSet;
 
 public class McpMain {
     private static final Gson gson = new Gson();
@@ -387,7 +389,8 @@ public class McpMain {
     private static String searchClasses(String keyword) {
         String lowerKeyword = keyword.toLowerCase();
         PandaFile pf = WorkspaceContext.getInstance().getCurrentProject().getPandaFile();
-        List<String> matches = new ArrayList<>();
+        Set<String> matches = new LinkedHashSet<>();
+        
         for (IndexHeader ih : pf.getIndexHeaders()) {
             for (PandaClass pc : ih.getPandaClasses()) {
                 String cName = pc.getName().getContent();
@@ -399,6 +402,15 @@ public class McpMain {
                 }
             }
             if (matches.size() >= 100) break;
+        }
+
+        if (matches.size() < 100) {
+            GlobalXrefManager xrefs = WorkspaceContext.getInstance().getXrefManager();
+            List<String> classesUsingString = xrefs.getClassesUsingString(keyword);
+            for(String c : classesUsingString) {
+                matches.add(c + " (via string literal match)");
+                if (matches.size() >= 100) break;
+            }
         }
         
         if (matches.isEmpty()) {
