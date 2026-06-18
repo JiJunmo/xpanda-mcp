@@ -25,7 +25,13 @@ public final class PandaProjectInfo {
 
     public static PandaProjectInfo createPandaProject(File file) {
         try {
-            PandaFile pandaFile = new PandaFile(new FileInputStream(file));
+            java.io.InputStream is;
+            if (file.getName().endsWith(".hap") || file.getName().endsWith(".zip")) {
+                is = jmp0.abc.util.HapUtils.getAbcInputStreamFromHap(file);
+            } else {
+                is = new FileInputStream(file);
+            }
+            PandaFile pandaFile = new PandaFile(is);
             int checksum = pandaFile.getHeader().getChecksum().intValue();
             File projectDir = new File(file.getParent(),file.getName() + "_" + checksum);
             if (!projectDir.isDirectory()){

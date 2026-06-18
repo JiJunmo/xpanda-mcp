@@ -11,8 +11,8 @@ dependencies {
     implementation 'org.graalvm.js:js-scriptengine:22.3.1'
     implementation 'org.graalvm.js:js:22.3.1'
     implementation 'io.reactivex.rxjava3:rxjava:3.1.8'
-    compileOnly 'org.projectlombok:lombok:1.18.24'
-    annotationProcessor 'org.projectlombok:lombok:1.18.24'
+    compileOnly 'org.projectlombok:lombok:1.18.32'
+    annotationProcessor 'org.projectlombok:lombok:1.18.32'
 }
 
 test {
