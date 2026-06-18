@@ -58,23 +58,44 @@
 ## 编译与部署指南
 
 ### 1. 编译项目
-在项目根目录下，使用 Gradle 包装器进行编译和分发打包：
-```bash
-# 编译项目（跳过测试）
-./gradlew :mcp:build -x test
+在项目根目录下，使用 Gradle 包装器进行编译打包：
 
-# 将 MCP 服务安装到本地分发目录
+#### 方案 A：编译为独立 Fat JAR (推荐，发布与拷贝最简便)
+```bash
+./gradlew :mcp:jar
+```
+编译完成后，独立的打包文件生成在：
+`mcp/build/libs/xpanda-mcp.jar`
+
+#### 方案 B：生成本地分发目录 (原方案)
+```bash
 ./gradlew :mcp:installDist
 ```
-编译完成后，可执行程序将生成在：
+编译完成后，可执行启动脚本生成在：
 `mcp/build/install/mcp/bin/mcp` (macOS/Linux) 或 `mcp.bat` (Windows)
 
 ### 2. 在 MCP 客户端中配置
 
 你可以将此服务注册到 Claude Desktop、Cursor 或其它兼容 MCP 的客户端中。
 
+#### 方式一：使用独立 Fat JAR 运行 (推荐)
 以 **Claude Desktop** 为例，修改 `claude_desktop_config.json`（通常位于 `~/Library/Application Support/Claude/claude_desktop_config.json`）：
 
+```json
+{
+  "mcpServers": {
+    "xpanda-mcp": {
+      "command": "java",
+      "args": [
+        "-jar",
+        "/绝对路径/to/xpanda-mcp/mcp/build/libs/xpanda-mcp.jar"
+      ]
+    }
+  }
+}
+```
+
+#### 方式二：使用安装分发的可执行脚本运行
 ```json
 {
   "mcpServers": {
