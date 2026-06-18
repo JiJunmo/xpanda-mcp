@@ -196,6 +196,48 @@ public class McpMain {
         getClassInfo.add("inputSchema", classInput);
         tools.add(getClassInfo);
 
+        // 9. get_xrefs_to_class
+        JsonObject getXrefsClass = new JsonObject();
+        getXrefsClass.addProperty("name", "get_xrefs_to_class");
+        getXrefsClass.addProperty("description", "Finds all classes and methods that reference the specified class.");
+        getXrefsClass.add("inputSchema", classInput);
+        tools.add(getXrefsClass);
+
+        // 10. get_xrefs_to_method
+        JsonObject getXrefsMethod = new JsonObject();
+        getXrefsMethod.addProperty("name", "get_xrefs_to_method");
+        getXrefsMethod.addProperty("description", "Finds all methods that call the specified method.");
+        getXrefsMethod.add("inputSchema", methodInput);
+        tools.add(getXrefsMethod);
+
+        // 11. get_xrefs_to_field
+        JsonObject fieldInput = new JsonObject();
+        fieldInput.addProperty("type", "object");
+        JsonObject fieldProps = new JsonObject();
+        fieldProps.add("className", classNameProp);
+        JsonObject fieldNameProp = new JsonObject();
+        fieldNameProp.addProperty("type", "string");
+        fieldNameProp.addProperty("description", "The exact field name.");
+        fieldProps.add("fieldName", fieldNameProp);
+        fieldInput.add("properties", fieldProps);
+        JsonArray fieldReq = new JsonArray();
+        fieldReq.add("className");
+        fieldReq.add("fieldName");
+        fieldInput.add("required", fieldReq);
+        
+        JsonObject getXrefsField = new JsonObject();
+        getXrefsField.addProperty("name", "get_xrefs_to_field");
+        getXrefsField.addProperty("description", "Finds all methods that read or write to the specified field.");
+        getXrefsField.add("inputSchema", fieldInput);
+        tools.add(getXrefsField);
+
+        // 12. get_inheritance_hierarchy
+        JsonObject getInheritance = new JsonObject();
+        getInheritance.addProperty("name", "get_inheritance_hierarchy");
+        getInheritance.addProperty("description", "Returns the inheritance chain (parent/children) for a class.");
+        getInheritance.add("inputSchema", classInput);
+        tools.add(getInheritance);
+
         JsonObject result = new JsonObject();
         result.add("tools", tools);
         sendResponse(id, result);
@@ -246,6 +288,22 @@ public class McpMain {
                     requireContext();
                     contentText = getClassInfo(args.get("className").getAsString());
                     break;
+                case "get_xrefs_to_class":
+                    requireContext();
+                    contentText = formatXrefs("Class " + args.get("className").getAsString(), WorkspaceContext.getInstance().getXrefManager().getClassXrefs(args.get("className").getAsString()));
+                    break;
+                case "get_xrefs_to_method":
+                    requireContext();
+                    contentText = formatXrefs("Method " + args.get("methodName").getAsString(), WorkspaceContext.getInstance().getXrefManager().getMethodXrefs(args.get("className").getAsString(), args.get("methodName").getAsString()));
+                    break;
+                case "get_xrefs_to_field":
+                    requireContext();
+                    contentText = formatXrefs("Field " + args.get("fieldName").getAsString(), WorkspaceContext.getInstance().getXrefManager().getFieldXrefs(args.get("className").getAsString(), args.get("fieldName").getAsString()));
+                    break;
+                case "get_inheritance_hierarchy":
+                    requireContext();
+                    contentText = WorkspaceContext.getInstance().getXrefManager().getInheritanceHierarchy(args.get("className").getAsString());
+                    break;
                 default:
                     throw new Exception("Unknown tool: " + name);
             }
@@ -259,6 +317,25 @@ public class McpMain {
         if (WorkspaceContext.getInstance().getCurrentProject() == null) {
             throw new Exception("No archive loaded. Call open_archive first.");
         }
+    }
+
+    private static String formatXrefs(String target, List<String> xrefs) {
+        if (xrefs == null || xrefs.isEmpty()) {
+            return "No cross-references found for " + target;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("Cross-references for ").append(target).append(" (").append(xrefs.size()).append(" found):\n");
+        // Limit output to prevent token explosion
+        int count = 0;
+        for (String xref : xrefs) {
+            sb.append("- ").append(xref).append("\n");
+            count++;
+            if (count >= 300) {
+                sb.append("... (truncated at 300 results)");
+                break;
+            }
+        }
+        return sb.toString();
     }
 
     private static PandaClass findPandaClass(String className) throws Exception {

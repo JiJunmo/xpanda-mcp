@@ -7,6 +7,7 @@ public class WorkspaceContext {
     private static WorkspaceContext instance;
     private PandaProjectInfo currentProject;
     private File currentArchiveFile;
+    private GlobalXrefManager xrefManager;
 
     private WorkspaceContext() {}
 
@@ -28,6 +29,14 @@ public class WorkspaceContext {
         }
         this.currentProject = projectInfo;
         this.currentArchiveFile = file;
+        this.xrefManager = new GlobalXrefManager(); // Reset xref manager
+    }
+
+    public GlobalXrefManager getXrefManager() {
+        if (xrefManager != null && currentProject != null) {
+            xrefManager.build(currentProject.getPandaFile());
+        }
+        return xrefManager;
     }
 
     public PandaProjectInfo getCurrentProject() {
