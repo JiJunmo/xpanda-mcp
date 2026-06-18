@@ -171,6 +171,31 @@ public class McpMain {
         getBytecode.add("inputSchema", methodInput);
         tools.add(getBytecode);
 
+        // 7. search_classes
+        JsonObject searchClasses = new JsonObject();
+        searchClasses.addProperty("name", "search_classes");
+        searchClasses.addProperty("description", "Searches for a class name in the loaded archive using a keyword.");
+        JsonObject searchInput = new JsonObject();
+        searchInput.addProperty("type", "object");
+        JsonObject searchProps = new JsonObject();
+        JsonObject keywordProp = new JsonObject();
+        keywordProp.addProperty("type", "string");
+        keywordProp.addProperty("description", "Keyword to search for (e.g. MainAbility)");
+        searchProps.add("keyword", keywordProp);
+        searchInput.add("properties", searchProps);
+        JsonArray searchReq = new JsonArray();
+        searchReq.add("keyword");
+        searchInput.add("required", searchReq);
+        searchClasses.add("inputSchema", searchInput);
+        tools.add(searchClasses);
+
+        // 8. get_class_info
+        JsonObject getClassInfo = new JsonObject();
+        getClassInfo.addProperty("name", "get_class_info");
+        getClassInfo.addProperty("description", "Returns a list of methods and signatures for a specific class without decompiling it fully.");
+        getClassInfo.add("inputSchema", classInput);
+        tools.add(getClassInfo);
+
         JsonObject result = new JsonObject();
         result.add("tools", tools);
         sendResponse(id, result);
@@ -212,6 +237,14 @@ public class McpMain {
                 case "get_bytecode":
                     requireContext();
                     contentText = getBytecode(args.get("className").getAsString(), args.get("methodName").getAsString());
+                    break;
+                case "search_classes":
+                    requireContext();
+                    contentText = searchClasses(args.get("keyword").getAsString());
+                    break;
+                case "get_class_info":
+                    requireContext();
+                    contentText = getClassInfo(args.get("className").getAsString());
                     break;
                 default:
                     throw new Exception("Unknown tool: " + name);
@@ -272,6 +305,51 @@ public class McpMain {
             return "Method " + methodName + " has no bytecode.";
         }
         return "Method: " + methodName + "\n" + cfg.toString();
+    }
+    
+    private static String searchClasses(String keyword) {
+        String lowerKeyword = keyword.toLowerCase();
+        PandaFile pf = WorkspaceContext.getInstance().getCurrentProject().getPandaFile();
+        List<String> matches = new ArrayList<>();
+        for (IndexHeader ih : pf.getIndexHeaders()) {
+            for (PandaClass pc : ih.getPandaClasses()) {
+                String cName = pc.getName().getContent();
+                if (cName.toLowerCase().contains(lowerKeyword)) {
+                    matches.add(cName);
+                    if (matches.size() >= 100) {
+                        break;
+                    }
+                }
+            }
+            if (matches.size() >= 100) break;
+        }
+        
+        if (matches.isEmpty()) {
+            return "No classes found matching keyword: " + keyword;
+        }
+        
+        StringBuilder sb = new StringBuilder();
+        sb.append("Search Results (max 100):\n");
+        for (String m : matches) {
+            sb.append("- ").append(m).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private static String getClassInfo(String className) throws Exception {
+        PandaClass pc = findPandaClass(className);
+        StringBuilder sb = new StringBuilder();
+        sb.append("Class Info: ").append(pc.getName().getContent()).append("\n");
+        sb.append("Methods:\n");
+        if (pc.getPandaMethods().isEmpty()) {
+            sb.append("(No methods found)");
+        } else {
+            for (PandaMethod pm : pc.getPandaMethods().values()) {
+                sb.append("- ").append(pm.getName().getContent())
+                  .append(" (Args: ").append(pm.getMethodCode() != null ? pm.getMethodCode().getNumArgs().intValue() : "unknown").append(")\n");
+            }
+        }
+        return sb.toString();
     }
 
     private static String generateProjectTree() {
