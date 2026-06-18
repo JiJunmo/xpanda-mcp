@@ -240,6 +240,68 @@ public class McpMain {
         getInheritance.add("inputSchema", classInput);
         tools.add(getInheritance);
 
+        // 13. search_text
+        JsonObject searchText = new JsonObject();
+        searchText.addProperty("name", "search_text");
+        searchText.addProperty("description", "Global search for text in code, string literals, or comments.");
+        JsonObject searchTextInput = new JsonObject();
+        searchTextInput.addProperty("type", "object");
+        JsonObject searchTextProps = new JsonObject();
+        
+        JsonObject queryProp = new JsonObject();
+        queryProp.addProperty("type", "string");
+        queryProp.addProperty("description", "Text query to search for");
+        searchTextProps.add("query", queryProp);
+        
+        JsonObject searchInProp = new JsonObject();
+        searchInProp.addProperty("type", "string");
+        searchInProp.addProperty("description", "Where to search: code, string, comment, all (default)");
+        JsonArray searchInEnum = new JsonArray();
+        searchInEnum.add("code");
+        searchInEnum.add("string");
+        searchInEnum.add("comment");
+        searchInEnum.add("all");
+        searchInProp.add("enum", searchInEnum);
+        searchTextProps.add("searchIn", searchInProp);
+        
+        searchTextInput.add("properties", searchTextProps);
+        JsonArray searchTextReq = new JsonArray();
+        searchTextReq.add("query");
+        searchTextInput.add("required", searchTextReq);
+        searchText.add("inputSchema", searchTextInput);
+        tools.add(searchText);
+
+        // 14. search_symbol
+        JsonObject searchSymbol = new JsonObject();
+        searchSymbol.addProperty("name", "search_symbol");
+        searchSymbol.addProperty("description", "Global search for classes, methods, or fields using a regular expression pattern.");
+        JsonObject searchSymbolInput = new JsonObject();
+        searchSymbolInput.addProperty("type", "object");
+        JsonObject searchSymbolProps = new JsonObject();
+        
+        JsonObject namePatternProp = new JsonObject();
+        namePatternProp.addProperty("type", "string");
+        namePatternProp.addProperty("description", "Regular expression pattern for the symbol name (e.g. .*MainAbility.*)");
+        searchSymbolProps.add("namePattern", namePatternProp);
+        
+        JsonObject typeProp = new JsonObject();
+        typeProp.addProperty("type", "string");
+        typeProp.addProperty("description", "Type of symbol: class, method, field, all (default)");
+        JsonArray typeEnum = new JsonArray();
+        typeEnum.add("class");
+        typeEnum.add("method");
+        typeEnum.add("field");
+        typeEnum.add("all");
+        typeProp.add("enum", typeEnum);
+        searchSymbolProps.add("type", typeProp);
+        
+        searchSymbolInput.add("properties", searchSymbolProps);
+        JsonArray searchSymbolReq = new JsonArray();
+        searchSymbolReq.add("namePattern");
+        searchSymbolInput.add("required", searchSymbolReq);
+        searchSymbol.add("inputSchema", searchSymbolInput);
+        tools.add(searchSymbol);
+
         JsonObject result = new JsonObject();
         result.add("tools", tools);
         sendResponse(id, result);
@@ -305,6 +367,18 @@ public class McpMain {
                 case "get_inheritance_hierarchy":
                     requireContext();
                     contentText = WorkspaceContext.getInstance().getXrefManager().getInheritanceHierarchy(args.get("className").getAsString());
+                    break;
+                case "search_text":
+                    requireContext();
+                    String query = args.get("query").getAsString();
+                    String searchIn = args.has("searchIn") ? args.get("searchIn").getAsString() : "all";
+                    contentText = searchText(query, searchIn);
+                    break;
+                case "search_symbol":
+                    requireContext();
+                    String namePattern = args.get("namePattern").getAsString();
+                    String type = args.has("type") ? args.get("type").getAsString() : "all";
+                    contentText = searchSymbol(namePattern, type);
                     break;
                 default:
                     throw new Exception("Unknown tool: " + name);
@@ -421,6 +495,154 @@ public class McpMain {
         sb.append("Search Results (max 100):\n");
         for (String m : matches) {
             sb.append("- ").append(m).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private static String searchSymbol(String namePattern, String type) {
+        java.util.regex.Pattern pattern;
+        try {
+            pattern = java.util.regex.Pattern.compile(namePattern, java.util.regex.Pattern.CASE_INSENSITIVE);
+        } catch (Exception e) {
+            return "Invalid regular expression pattern: " + namePattern;
+        }
+
+        List<String> results = new ArrayList<>();
+        int limit = 150;
+        boolean isAll = "all".equals(type);
+        boolean searchClass = "class".equals(type) || isAll;
+        boolean searchMethod = "method".equals(type) || isAll;
+        boolean searchField = "field".equals(type) || isAll;
+
+        PandaFile pf = WorkspaceContext.getInstance().getCurrentProject().getPandaFile();
+        for (IndexHeader ih : pf.getIndexHeaders()) {
+            for (PandaClass pc : ih.getPandaClasses()) {
+                String className = pc.getName().getContent();
+
+                if (searchClass) {
+                    if (pattern.matcher(className).find()) {
+                        results.add("[class] " + className);
+                        if (results.size() >= limit) break;
+                    }
+                }
+
+                if (searchMethod) {
+                    for (PandaMethod pm : pc.getPandaMethods().values()) {
+                        String methodName = pm.getName().getContent();
+                        if (pattern.matcher(methodName).find()) {
+                            results.add("[method] " + className + "->" + methodName);
+                            if (results.size() >= limit) break;
+                        }
+                    }
+                }
+
+                if (searchField) {
+                    if (pc.getPandaFields() != null) {
+                        for (jmp0.abc.file.field.PandaField f : pc.getPandaFields()) {
+                            String fieldName = f.getName().getContent();
+                            if (pattern.matcher(fieldName).find()) {
+                                results.add("[field] " + className + "->" + fieldName);
+                                if (results.size() >= limit) break;
+                            }
+                        }
+                    }
+                }
+                
+                if (results.size() >= limit) break;
+            }
+            if (results.size() >= limit) break;
+        }
+
+        if (results.isEmpty()) {
+            return "No symbols found matching pattern: " + namePattern + " (type: " + type + ")";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Search Symbol Results (matching '").append(namePattern).append("', type: '").append(type).append("', max ").append(limit).append("):\n");
+        for (String r : results) {
+            sb.append("- ").append(r).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private static String searchText(String query, String searchIn) {
+        List<String> results = new ArrayList<>();
+        int limit = 150;
+        boolean isAll = "all".equals(searchIn);
+        boolean searchString = "string".equals(searchIn) || isAll;
+        boolean searchCode = "code".equals(searchIn) || "comment".equals(searchIn) || isAll;
+
+        String lowerQuery = query.toLowerCase();
+
+        // 1. Search in String literals
+        if (searchString) {
+            GlobalXrefManager xrefs = WorkspaceContext.getInstance().getXrefManager();
+            java.util.Map<String, List<String>> stringMatches = xrefs.getStringXrefsMatching(query);
+            for (java.util.Map.Entry<String, List<String>> entry : stringMatches.entrySet()) {
+                String matchedStr = entry.getKey();
+                for (String usage : entry.getValue()) {
+                    results.add("[string] \"" + matchedStr + "\" referenced in " + usage);
+                    if (results.size() >= limit) break;
+                }
+                if (results.size() >= limit) break;
+            }
+        }
+
+        // 2. Search in Disassembled/Decompiled code
+        if (searchCode && results.size() < limit) {
+            PandaFile pf = WorkspaceContext.getInstance().getCurrentProject().getPandaFile();
+            for (IndexHeader ih : pf.getIndexHeaders()) {
+                for (PandaClass pc : ih.getPandaClasses()) {
+                    if (pc.isClassExternal()) continue;
+                    String className = pc.getName().getContent();
+
+                    // Check imports/exports first
+                    if (pc.getPandaClassModuleData() != null) {
+                        for (jmp0.abc.file.clazz.PandaClassImportModule im : pc.getPandaClassModuleData().getImports()) {
+                            if (im.toString().toLowerCase().contains(lowerQuery)) {
+                                results.add("[code] " + className + " (in module imports: " + im.toString() + ")");
+                                if (results.size() >= limit) break;
+                            }
+                        }
+                        if (results.size() >= limit) break;
+
+                        for (jmp0.abc.file.clazz.PandaClassExportModule ex : pc.getPandaClassModuleData().getExports()) {
+                            if (ex.toString().toLowerCase().contains(lowerQuery)) {
+                                results.add("[code] " + className + " (in module exports: " + ex.toString() + ")");
+                                if (results.size() >= limit) break;
+                            }
+                        }
+                        if (results.size() >= limit) break;
+                    }
+
+                    // Check methods disasm
+                    for (PandaMethod pm : pc.getPandaMethods().values()) {
+                        try {
+                            PandaIRCFG cfg = pm.disAssemble();
+                            if (cfg == null) continue;
+                            String cfgStr = cfg.toString();
+                            if (cfgStr.toLowerCase().contains(lowerQuery)) {
+                                results.add("[code] " + className + "->" + pm.getName().getContent() + " (contains query in bytecode)");
+                                if (results.size() >= limit) break;
+                            }
+                        } catch (Exception e) {
+                            // ignore disassembly errors
+                        }
+                    }
+                    if (results.size() >= limit) break;
+                }
+                if (results.size() >= limit) break;
+            }
+        }
+
+        if (results.isEmpty()) {
+            return "No text matches found for query: \"" + query + "\" (searchIn: " + searchIn + ")";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Search Text Results (matching '").append(query).append("', searchIn: '").append(searchIn).append("', max ").append(limit).append("):\n");
+        for (String r : results) {
+            sb.append("- ").append(r).append("\n");
         }
         return sb.toString();
     }

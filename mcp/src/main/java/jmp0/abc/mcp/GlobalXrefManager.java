@@ -255,4 +255,18 @@ public class GlobalXrefManager {
         }
         return sb.toString();
     }
+
+    public Map<String, List<String>> getStringXrefsMatching(String query) {
+        Map<String, List<String>> matches = new LinkedHashMap<>();
+        String lowerQuery = query.toLowerCase();
+        synchronized (this) {
+            for (Map.Entry<String, List<String>> entry : stringXrefs.entrySet()) {
+                if (entry.getKey().toLowerCase().contains(lowerQuery)) {
+                    matches.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+        return matches;
+    }
 }
+
