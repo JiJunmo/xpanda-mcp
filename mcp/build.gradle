@@ -1,0 +1,25 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'jmp0.abc'
+version = '1.0-SNAPSHOT'
+
+dependencies {
+    implementation project(':core')
+    implementation project(':gui')
+    implementation 'com.google.code.gson:gson:2.10.1'
+    compileOnly 'org.projectlombok:lombok:1.18.32'
+    annotationProcessor 'org.projectlombok:lombok:1.18.32'
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+application {
+    mainClass = 'jmp0.abc.mcp.McpMain'
+}
+
+test {
+    useJUnitPlatform()
+}

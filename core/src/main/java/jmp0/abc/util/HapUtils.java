@@ -26,4 +26,20 @@ public class HapUtils {
         }
         throw new FileNotFoundException("No .abc file found in .hap archive: " + hapFile.getName());
     }
+
+    public static String getManifestFromHap(File hapFile, String fileName) throws IOException {
+        try (ZipFile zipFile = new ZipFile(hapFile)) {
+            Enumeration<? extends ZipEntry> entries = zipFile.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                // Match exact file name or file name within a directory (e.g., module.json or ets/module.json)
+                if (entry.getName().equals(fileName) || entry.getName().endsWith("/" + fileName)) {
+                    try (InputStream is = zipFile.getInputStream(entry)) {
+                        return new String(is.readAllBytes(), "UTF-8");
+                    }
+                }
+            }
+        }
+        return null;
+    }
 }
