@@ -1,9 +1,12 @@
 package jmp0.abc.mcp;
 
 import com.google.gson.*;
+import jmp0.abc.disasm.PandaDisAssemblerFakeCodeHelper;
+import jmp0.abc.disasm.block.PandaIRCFG;
 import jmp0.abc.file.PandaFile;
 import jmp0.abc.file.clazz.PandaClass;
 import jmp0.abc.file.desc.IndexHeader;
+import jmp0.abc.file.method.PandaMethod;
 import jmp0.abc.util.HapUtils;
 
 import java.io.BufferedReader;
@@ -101,13 +104,14 @@ public class McpMain {
         openArchive.add("inputSchema", openArchiveInput);
         tools.add(openArchive);
 
+        JsonObject emptySchema = new JsonObject();
+        emptySchema.addProperty("type", "object");
+        emptySchema.add("properties", new JsonObject());
+
         // 2. get_project_tree
         JsonObject getTree = new JsonObject();
         getTree.addProperty("name", "get_project_tree");
         getTree.addProperty("description", "Returns the package structure tree of the loaded project, grouping by packages.");
-        JsonObject emptySchema = new JsonObject();
-        emptySchema.addProperty("type", "object");
-        emptySchema.add("properties", new JsonObject());
         getTree.add("inputSchema", emptySchema);
         tools.add(getTree);
 
@@ -117,6 +121,55 @@ public class McpMain {
         getManifest.addProperty("description", "Parses and returns formatted module.json5 or app.json5 from the loaded archive.");
         getManifest.add("inputSchema", emptySchema);
         tools.add(getManifest);
+
+        // 4. get_class_source
+        JsonObject getClassSource = new JsonObject();
+        getClassSource.addProperty("name", "get_class_source");
+        getClassSource.addProperty("description", "Returns the full decompiled source code for a specific class.");
+        JsonObject classInput = new JsonObject();
+        classInput.addProperty("type", "object");
+        JsonObject classProps = new JsonObject();
+        JsonObject classNameProp = new JsonObject();
+        classNameProp.addProperty("type", "string");
+        classNameProp.addProperty("description", "The class name, e.g. Lcom/huawei/wallet/Main;");
+        classProps.add("className", classNameProp);
+        classInput.add("properties", classProps);
+        JsonArray classReq = new JsonArray();
+        classReq.add("className");
+        classInput.add("required", classReq);
+        getClassSource.add("inputSchema", classInput);
+        tools.add(getClassSource);
+
+        // 5. get_method_source & 6. get_bytecode
+        JsonObject methodInput = new JsonObject();
+        methodInput.addProperty("type", "object");
+        JsonObject methodProps = new JsonObject();
+        methodProps.add("className", classNameProp);
+        JsonObject methodNameProp = new JsonObject();
+        methodNameProp.addProperty("type", "string");
+        methodNameProp.addProperty("description", "The exact method name.");
+        methodProps.add("methodName", methodNameProp);
+        JsonObject sigProp = new JsonObject();
+        sigProp.addProperty("type", "string");
+        sigProp.addProperty("description", "Optional signature to resolve overloads");
+        methodProps.add("signature", sigProp);
+        methodInput.add("properties", methodProps);
+        JsonArray methodReq = new JsonArray();
+        methodReq.add("className");
+        methodReq.add("methodName");
+        methodInput.add("required", methodReq);
+
+        JsonObject getMethodSource = new JsonObject();
+        getMethodSource.addProperty("name", "get_method_source");
+        getMethodSource.addProperty("description", "Returns the decompiled source code for a specific method.");
+        getMethodSource.add("inputSchema", methodInput);
+        tools.add(getMethodSource);
+
+        JsonObject getBytecode = new JsonObject();
+        getBytecode.addProperty("name", "get_bytecode");
+        getBytecode.addProperty("description", "Returns raw bytecode instructions (Smali-like) for a specific method.");
+        getBytecode.add("inputSchema", methodInput);
+        tools.add(getBytecode);
 
         JsonObject result = new JsonObject();
         result.add("tools", tools);
@@ -141,16 +194,24 @@ public class McpMain {
                     contentText = "Successfully loaded archive: " + path + "\nTotal classes found: " + classCount;
                     break;
                 case "get_project_tree":
-                    if (WorkspaceContext.getInstance().getCurrentProject() == null) {
-                        throw new Exception("No archive loaded. Call open_archive first.");
-                    }
+                    requireContext();
                     contentText = generateProjectTree();
                     break;
                 case "get_manifest_info":
-                    if (WorkspaceContext.getInstance().getCurrentArchiveFile() == null) {
-                        throw new Exception("No archive loaded. Call open_archive first.");
-                    }
+                    requireContext();
                     contentText = getManifestInfo();
+                    break;
+                case "get_class_source":
+                    requireContext();
+                    contentText = getClassSource(args.get("className").getAsString());
+                    break;
+                case "get_method_source":
+                    requireContext();
+                    contentText = getMethodSource(args.get("className").getAsString(), args.get("methodName").getAsString());
+                    break;
+                case "get_bytecode":
+                    requireContext();
+                    contentText = getBytecode(args.get("className").getAsString(), args.get("methodName").getAsString());
                     break;
                 default:
                     throw new Exception("Unknown tool: " + name);
@@ -159,6 +220,58 @@ public class McpMain {
         } catch (Exception e) {
             sendToolResponse(id, "Error executing tool: " + e.getMessage(), true);
         }
+    }
+
+    private static void requireContext() throws Exception {
+        if (WorkspaceContext.getInstance().getCurrentProject() == null) {
+            throw new Exception("No archive loaded. Call open_archive first.");
+        }
+    }
+
+    private static PandaClass findPandaClass(String className) throws Exception {
+        PandaFile pf = WorkspaceContext.getInstance().getCurrentProject().getPandaFile();
+        for (IndexHeader ih : pf.getIndexHeaders()) {
+            for (PandaClass pc : ih.getPandaClasses()) {
+                if (pc.getName().getContent().equals(className)) {
+                    return pc;
+                }
+            }
+        }
+        throw new Exception("Class not found: " + className);
+    }
+
+    private static PandaMethod findPandaMethod(PandaClass pc, String methodName) throws Exception {
+        PandaMethod method = pc.getPandaMethods().get(methodName);
+        if (method == null) {
+            throw new Exception("Method not found: " + methodName + " in class " + pc.getName().getContent());
+        }
+        return method;
+    }
+
+    private static String getClassSource(String className) throws Exception {
+        PandaClass pc = findPandaClass(className);
+        PandaIRCFG[] cfgs = pc.disAssembleAllMethods();
+        return PandaDisAssemblerFakeCodeHelper.genFakeCode(pc, cfgs);
+    }
+
+    private static String getMethodSource(String className, String methodName) throws Exception {
+        PandaClass pc = findPandaClass(className);
+        PandaMethod pm = findPandaMethod(pc, methodName);
+        PandaIRCFG cfg = pm.disAssemble();
+        if (cfg == null) {
+            return "Method " + methodName + " has no code or cannot be disassembled.";
+        }
+        return PandaDisAssemblerFakeCodeHelper.genFakeCode(pc, new PandaIRCFG[]{cfg});
+    }
+
+    private static String getBytecode(String className, String methodName) throws Exception {
+        PandaClass pc = findPandaClass(className);
+        PandaMethod pm = findPandaMethod(pc, methodName);
+        PandaIRCFG cfg = pm.disAssemble();
+        if (cfg == null) {
+            return "Method " + methodName + " has no bytecode.";
+        }
+        return "Method: " + methodName + "\n" + cfg.toString();
     }
 
     private static String generateProjectTree() {
@@ -172,15 +285,12 @@ public class McpMain {
         
         StringBuilder sb = new StringBuilder();
         sb.append("Project Tree:\n");
-        // Simplified tree generation (listing packages or classes)
-        // For token efficiency and readability, we group by the first few segments of the package
         List<String> sortedClasses = new ArrayList<>(classes);
         sortedClasses.sort(String::compareTo);
         for(String c : sortedClasses) {
             sb.append("- ").append(c).append("\n");
         }
         
-        // Truncate if too large to avoid blowing up the token context
         if (sb.length() > 50000) {
             return sb.substring(0, 50000) + "\n... (truncated due to size)";
         }
@@ -193,7 +303,6 @@ public class McpMain {
             return "Loaded file is a raw .abc file. No manifest available.";
         }
         
-        // Attempt to read module.json
         String moduleJson = HapUtils.getManifestFromHap(file, "module.json");
         if (moduleJson == null) {
             moduleJson = HapUtils.getManifestFromHap(file, "ets/module.json");
